@@ -1,0 +1,29 @@
+[package]
+name = "dlight"
+version = "0.1.0"
+authors = ["Harry Ying <lexugeyky@outlook.com>"]
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+rcgen = "^0.8"
+webpki = "^0.21"
+rustls = { version = "^0.19", features = ["dangerous_configuration"] }
+
+# quinn = { git = "https://github.com/LEXUGE/quinn", branch = "main" }
+# quinn-proto = { git = "https://github.com/LEXUGE/quinn", branch = "main" }
+quinn = { path = "../quinn/quinn" }
+quinn-proto = { path = "../quinn/quinn-proto" }
+
+num_enum = "^0.5"
+thiserror = "^1.0"
+bytes = "^1"
+tokio = { version = "^1.5", features = ["rt-multi-thread", "net", "fs", "macros", "io-util", "sync"]}
+trust-dns-proto = "^0.20"
+async-trait = "^0.1"
+structopt = "^0.3"
+anyhow = "^1.0"
+futures = "^0.3"
+simple_logger = "^1.11"
+log = "^0.4"

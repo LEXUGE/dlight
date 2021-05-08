@@ -18,9 +18,13 @@ async fn main() -> Result<()> {
     let args: DlightOpts = DlightOpts::from_args();
     SimpleLogger::new().with_level(LevelFilter::Debug).init()?;
     if let Some(remote) = args.remote {
-        // We bind to 0 port to get a random available port.
-        let udp = std::net::UdpSocket::bind("127.0.0.1:0")?;
-        let mut client = Client::<DnsSocket>::init(remote, args.bind, udp.try_into()?).await?;
+        // We bind to 0 port to get a random available port. Note "0.0.0.0" is necessary to communicate with the outer internet!
+        // Else it results in quite confusing LocallyClosed error.
+        // The reason behind is that the ConnectionDriver exits when EndpointDriver exits when transport poll_send fails because
+        // we are listening on loopback instead of 0.0.0.0!
+        let udp = std::net::UdpSocket::bind("0.0.0.0:0")?;
+        let mut client =
+            Client::<DnsSocket>::init(remote, args.bind, udp.try_into()?, &args.hostname).await?;
         //let mut client = Client::<quinn::transport::UdpSocket>::init(remote, args.bind, udp.try_into()?).await?;
         client.run().await?;
     } else {
@@ -40,4 +44,7 @@ struct DlightOpts {
 
     #[structopt(short, long, parse(try_from_str = str::parse))]
     remote: Option<SocketAddr>,
+
+    #[structopt(short, long, parse(try_from_str = str::parse), default_value = "localhost")]
+    hostname: String,
 }

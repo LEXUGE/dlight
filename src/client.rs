@@ -58,10 +58,16 @@ pub struct Client<T: Socket> {
 }
 
 impl<T: Socket> Client<T> {
-    pub async fn init(remote: SocketAddr, bind: SocketAddr, socket: T) -> anyhow::Result<Self> {
+    pub async fn init(
+        remote: SocketAddr,
+        bind: SocketAddr,
+        socket: T,
+        hostname: &str,
+    ) -> anyhow::Result<Self> {
         // We send keep-alive-package to keep the connection alive!
         let mut transport_cfg = TransportConfig::default();
         transport_cfg.keep_alive_interval(Some(Duration::from_millis(7000)));
+        transport_cfg.max_idle_timeout(Some(std::time::Duration::from_secs(180)))?;
 
         let mut client_cfg = configure_client();
         client_cfg.transport = Arc::new(transport_cfg);
@@ -71,11 +77,11 @@ impl<T: Socket> Client<T> {
         let (endpoint, _) = endpoint_builder.with_socket(socket)?;
 
         // connect to remote
-        let quinn::generic::NewConnection { connection, .. } =
-            endpoint.connect(&remote, "localhost")?.await?;
+        let new_conn: quinn::generic::NewConnection<TlsSession, T> =
+            endpoint.connect(&remote, hostname)?.await?;
 
         Ok(Self {
-            quic: connection,
+            quic: new_conn.connection,
             tcp: TcpListener::bind(bind).await?,
         })
     }
@@ -115,9 +121,10 @@ async fn handle_stream<T: Socket>(
     let mut quic_stream = QuinnStream::new(recv, send);
     info!("stream created successfully");
 
-    tokio::io::copy_bidirectional(&mut stream, &mut quic_stream)
-        .await
-        .unwrap();
+    match tokio::io::copy_bidirectional(&mut stream, &mut quic_stream).await {
+        Err(e) => warn!("bidi copy exited with error: {}", e),
+        Ok((tx, rx)) => info!("bidi copy finished. tx: {}, rx: {}", tx, rx),
+    };
 
     info!("requestor closed");
 

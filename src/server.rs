@@ -7,6 +7,7 @@ use futures::StreamExt;
 use log::*;
 use quinn::{
     crypto::rustls::TlsSession, generic::Incoming, transport::Socket, CertificateChain, PrivateKey,
+    TransportConfig,
 };
 use rcgen::generate_simple_self_signed;
 use tokio::{io::AsyncWriteExt, net::TcpStream};
@@ -19,7 +20,7 @@ impl<T: Socket> Server<T> {
     pub fn new(socket: T) -> anyhow::Result<Self> {
         // Generate a certificate that's valid for "localhost"
         // We are having trouble with IP signed root CA
-        let subject_alt_names = vec!["localhost".to_string()];
+        let subject_alt_names = vec!["localhost".to_string(), "a.cn".to_string()];
         let cert = generate_simple_self_signed(subject_alt_names).unwrap();
 
         let cert_chain = CertificateChain::from_pem(&cert.serialize_pem()?.into_bytes())?;
@@ -29,11 +30,16 @@ impl<T: Socket> Server<T> {
         servercfg.protocols(crate::ALPN_QUIC);
         servercfg.certificate(cert_chain, priv_key)?;
 
+        // Set up the server config
+        let mut servercfg = servercfg.build();
+
+        let mut transport_cfg = TransportConfig::default();
+        transport_cfg.max_idle_timeout(Some(std::time::Duration::from_secs(180)))?;
+
+        servercfg.transport = std::sync::Arc::new(transport_cfg);
+
         let mut endpt_cfg = quinn::generic::Endpoint::<TlsSession, T>::builder();
-        endpt_cfg.listen(
-            // Set up the server config
-            servercfg.build(),
-        );
+        endpt_cfg.listen(servercfg);
         let (_, incoming) = endpt_cfg.with_socket(socket)?;
 
         Ok(Self { incoming })

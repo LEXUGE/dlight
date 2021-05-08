@@ -1,3 +1,4 @@
+use bytes::Buf;
 use quinn::transport::RecvMeta;
 use std::{
     convert::TryFrom,
@@ -6,14 +7,19 @@ use std::{
     task::{Context, Poll},
 };
 
+// Record::from_rdata(
+//             Name::from_utf8("gov.cn").unwrap(),
+//             600,
+//             RData::NULL(NULL::with(buf.to_vec())),
+//         );
+const DNS_HEADER: [u8; 28] = [
+    0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x1, 0x0, 0x0, 0x0, 0x0, 0x3, 0x67, 0x6f, 0x76, 0x2, 0x63,
+    0x6e, 0x0, 0x0, 0xa, 0x0, 0x1, 0x0, 0x0, 0x2, 0x58,
+];
+
 // `Socket` trait implementations for quinn
 use quinn::transport::Socket;
 use tokio::io::ReadBuf;
-use trust_dns_proto::{
-    op::message::Message,
-    rr::{rdata::null::NULL, record_data::RData, resource::Record, Name},
-    serialize::binary::BinEncodable,
-};
 
 pub struct DnsSocket {
     io: tokio::net::UdpSocket,
@@ -38,7 +44,14 @@ impl Socket for DnsSocket {
     ) -> Poll<Result<usize, io::Error>> {
         let mut sent = 0;
         for transmit in transmits {
-            encode(&mut transmit.contents)?;
+            let encoded = DNS_HEADER
+                // The data length
+                .chain(&(transmit.contents.len() as u16).to_be_bytes()[..])
+                // The actual content
+                .chain(transmit.contents.as_slice())
+                .into_iter()
+                .collect();
+            transmit.contents = encoded;
             match self
                 .io
                 .poll_send_to(cx, &transmit.contents, transmit.destination)
@@ -66,9 +79,10 @@ impl Socket for DnsSocket {
         debug_assert!(!bufs.is_empty());
         let mut buf = ReadBuf::new(&mut bufs[0]);
         let addr = futures::ready!(self.io.poll_recv_from(cx, &mut buf))?;
-        decode(&mut buf)?;
+        // We try to get rid of the DNS header
+        buf.filled_mut().rotate_left(30);
         meta[0] = RecvMeta {
-            len: buf.filled().len(),
+            len: buf.filled().len() - 30,
             addr,
             ecn: None,
             dst_ip: None,
@@ -79,61 +93,4 @@ impl Socket for DnsSocket {
     fn local_addr(&self) -> io::Result<SocketAddr> {
         self.io.local_addr()
     }
-}
-
-fn encode(buf: &mut Vec<u8>) -> std::io::Result<()> {
-    let mut msg = Message::new();
-    msg.add_answer({
-        let rcd = Record::from_rdata(
-            Name::from_utf8("www.apple.com").unwrap(),
-            32,
-            RData::NULL(NULL::with(buf.to_vec())),
-        );
-        rcd
-    });
-    *buf = msg.to_bytes().map_err(|_| {
-        std::io::Error::new(
-            std::io::ErrorKind::InvalidInput,
-            "failed to convert the QUIC packet into a DNS message",
-        )
-    })?;
-    Ok(())
-}
-
-fn decode(buf: &mut ReadBuf) -> std::io::Result<()> {
-    if let Some(record) = Message::from_vec(buf.filled())
-        .map_err(|_| {
-            std::io::Error::new(
-                std::io::ErrorKind::InvalidInput,
-                "failed to parse the raw packet into a DNS message",
-            )
-        })?
-        .answers()
-        .iter()
-        .next()
-    {
-        match record.rdata() {
-            RData::NULL(some) => {
-                return some
-                    .anything()
-                    .and_then(|x| {
-                        buf.clear();
-                        buf.put_slice(x);
-                        Some(())
-                    })
-                    .ok_or(std::io::Error::new(
-                        std::io::ErrorKind::InvalidInput,
-                        "NULL Record doesn't contain any data",
-                    ))
-            }
-            _ => {
-                log::warn!("record Type other than NULL");
-            }
-        }
-    } else {
-        log::warn!("no answer in DNS packet");
-    }
-    // We treat it as empty
-    buf.clear();
-    Ok(())
 }

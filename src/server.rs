@@ -74,7 +74,7 @@ impl<T: Socket> Server<T> {
     }
 }
 
-async fn handle_bidi(mut stream: QuinnStream) -> anyhow::Result<()> {
+async fn handle_bidi<T: Socket>(mut stream: QuinnStream<T>) -> anyhow::Result<()> {
     // Authentication and methods selection have already been done on the "client" side of the QUIC connection, we only care about method.
     match CmdRequest::read(&mut stream).await? {
         CmdRequest {
@@ -88,7 +88,11 @@ async fn handle_bidi(mut stream: QuinnStream) -> anyhow::Result<()> {
                     info!("successfully established connection to remote");
                     let msg: BytesMut = CmdReply::success(addr.into()).into();
                     stream.write_all(&msg).await?;
-                    tokio::io::copy_bidirectional(&mut stream, &mut v).await?;
+                    tokio::io::copy_bidirectional(&mut stream, &mut v)
+                        .await
+                        .unwrap();
+
+                    info!("client closed stream");
                 }
                 Err(_) => {
                     warn!("failed to connect to remote host via TCP, replying the client with a connection failure");

@@ -1,7 +1,14 @@
-use std::convert::{TryFrom, TryInto};
+use quinn::transport::RecvMeta;
+use std::{
+    convert::TryFrom,
+    io,
+    net::SocketAddr,
+    task::{Context, Poll},
+};
 
 // `Socket` trait implementations for quinn
-use quinn::transport::{Socket, UdpSocket};
+use quinn::transport::Socket;
+use tokio::io::ReadBuf;
 use trust_dns_proto::{
     op::message::Message,
     rr::{rdata::null::NULL, record_data::RData, resource::Record, Name},
@@ -9,15 +16,16 @@ use trust_dns_proto::{
 };
 
 pub struct DnsSocket {
-    udp: UdpSocket,
+    io: tokio::net::UdpSocket,
 }
 
 impl TryFrom<std::net::UdpSocket> for DnsSocket {
-    type Error = std::io::Error;
+    type Error = io::Error;
 
     fn try_from(socket: std::net::UdpSocket) -> Result<Self, Self::Error> {
-        Ok(Self {
-            udp: socket.try_into()?,
+        socket.set_nonblocking(true)?;
+        Ok(DnsSocket {
+            io: tokio::net::UdpSocket::from_std(socket)?,
         })
     }
 }
@@ -25,45 +33,55 @@ impl TryFrom<std::net::UdpSocket> for DnsSocket {
 impl Socket for DnsSocket {
     fn poll_send(
         &self,
-        cx: &mut std::task::Context,
+        cx: &mut Context,
         transmits: &mut [quinn::Transmit],
-    ) -> std::task::Poll<std::io::Result<usize>> {
-        let mut encoded_trans: Vec<quinn::Transmit> = Vec::new();
-        for t in transmits {
-            let mut transmit = t.clone();
-            transmit.contents = encode(&t.contents)?;
-            encoded_trans.push(transmit);
+    ) -> Poll<Result<usize, io::Error>> {
+        let mut sent = 0;
+        for transmit in transmits {
+            encode(&mut transmit.contents)?;
+            match self
+                .io
+                .poll_send_to(cx, &transmit.contents, transmit.destination)
+            {
+                Poll::Ready(Ok(_)) => {
+                    sent += 1;
+                }
+                // We need to report that some packets were sent in this case, so we rely on
+                // errors being either harmlessly transient (in the case of WouldBlock) or
+                // recurring on the next call.
+                Poll::Ready(Err(_)) | Poll::Pending if sent != 0 => return Poll::Ready(Ok(sent)),
+                Poll::Ready(Err(e)) => return Poll::Ready(Err(e)),
+                Poll::Pending => return Poll::Pending,
+            }
         }
-        // log::warn!("{:?}", encoded_trans);
-        self.udp.poll_send(cx, encoded_trans.as_mut_slice())
+        Poll::Ready(Ok(sent))
     }
 
     fn poll_recv(
         &self,
-        cx: &mut std::task::Context,
-        bufs: &mut [std::io::IoSliceMut<'_>],
-        meta: &mut [quinn::transport::RecvMeta],
-    ) -> std::task::Poll<std::io::Result<usize>> {
-        let len = futures::ready!(self.udp.poll_recv(cx, bufs, meta))?;
-        // in [0, len)
-        for i in 0..len {
-            let buf_len = meta[i].len;
-            let decoded = decode(&bufs[i][..buf_len])?;
-            meta[i].len = decoded.len();
-            bufs[i]
-                .split_at_mut(decoded.len())
-                .0
-                .copy_from_slice(decoded.as_slice());
-        }
-        std::task::Poll::Ready(Ok(len))
+        cx: &mut Context,
+        bufs: &mut [io::IoSliceMut<'_>],
+        meta: &mut [RecvMeta],
+    ) -> Poll<io::Result<usize>> {
+        debug_assert!(!bufs.is_empty());
+        let mut buf = ReadBuf::new(&mut bufs[0]);
+        let addr = futures::ready!(self.io.poll_recv_from(cx, &mut buf))?;
+        decode(&mut buf)?;
+        meta[0] = RecvMeta {
+            len: buf.filled().len(),
+            addr,
+            ecn: None,
+            dst_ip: None,
+        };
+        Poll::Ready(Ok(1))
     }
 
-    fn local_addr(&self) -> std::io::Result<std::net::SocketAddr> {
-        self.udp.local_addr()
+    fn local_addr(&self) -> io::Result<SocketAddr> {
+        self.io.local_addr()
     }
 }
 
-fn encode(buf: &[u8]) -> std::io::Result<Vec<u8>> {
+fn encode(buf: &mut Vec<u8>) -> std::io::Result<()> {
     let mut msg = Message::new();
     msg.add_answer({
         let rcd = Record::from_rdata(
@@ -73,16 +91,17 @@ fn encode(buf: &[u8]) -> std::io::Result<Vec<u8>> {
         );
         rcd
     });
-    msg.to_bytes().map_err(|_| {
+    *buf = msg.to_bytes().map_err(|_| {
         std::io::Error::new(
             std::io::ErrorKind::InvalidInput,
             "failed to convert the QUIC packet into a DNS message",
         )
-    })
+    })?;
+    Ok(())
 }
 
-fn decode(buf: &[u8]) -> std::io::Result<Vec<u8>> {
-    if let Some(record) = Message::from_vec(&buf)
+fn decode(buf: &mut ReadBuf) -> std::io::Result<()> {
+    if let Some(record) = Message::from_vec(buf.filled())
         .map_err(|_| {
             std::io::Error::new(
                 std::io::ErrorKind::InvalidInput,
@@ -97,19 +116,24 @@ fn decode(buf: &[u8]) -> std::io::Result<Vec<u8>> {
             RData::NULL(some) => {
                 return some
                     .anything()
-                    .and_then(|x| Some(x.to_vec()))
+                    .and_then(|x| {
+                        buf.clear();
+                        buf.put_slice(x);
+                        Some(())
+                    })
                     .ok_or(std::io::Error::new(
                         std::io::ErrorKind::InvalidInput,
                         "NULL Record doesn't contain any data",
                     ))
             }
             _ => {
-                log::warn!("record Type other than NULL")
+                log::warn!("record Type other than NULL");
             }
         }
     } else {
-        log::warn!("no answer in DNS packet")
+        log::warn!("no answer in DNS packet");
     }
-    // We treat the empty packet as normal?
-    Ok(Vec::new())
+    // We treat it as empty
+    buf.clear();
+    Ok(())
 }

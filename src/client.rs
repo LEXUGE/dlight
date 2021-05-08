@@ -5,10 +5,12 @@ use crate::{
 use bytes::BytesMut;
 use log::*;
 use quinn::{
-    crypto::rustls::TlsSession, generic::Endpoint, transport::Socket, ClientConfig,
-    ClientConfigBuilder, Connection,
+    crypto::rustls::TlsSession,
+    generic::{Connection, Endpoint},
+    transport::Socket,
+    ClientConfig, ClientConfigBuilder, TransportConfig,
 };
-use std::{marker::PhantomData, net::SocketAddr, sync::Arc};
+use std::{net::SocketAddr, sync::Arc, time::Duration};
 use tokio::{
     io::AsyncWriteExt,
     net::{TcpListener, TcpStream},
@@ -51,27 +53,30 @@ fn configure_client() -> ClientConfig {
 }
 
 pub struct Client<T: Socket> {
-    quic: Connection,
+    quic: Connection<TlsSession, T>,
     tcp: TcpListener,
-    socket_type: PhantomData<T>,
 }
 
 impl<T: Socket> Client<T> {
     pub async fn init(remote: SocketAddr, bind: SocketAddr, socket: T) -> anyhow::Result<Self> {
-        let client_cfg = configure_client();
+        // We send keep-alive-package to keep the connection alive!
+        let mut transport_cfg = TransportConfig::default();
+        transport_cfg.keep_alive_interval(Some(Duration::from_millis(7000)));
+
+        let mut client_cfg = configure_client();
+        client_cfg.transport = Arc::new(transport_cfg);
         let mut endpoint_builder = Endpoint::<TlsSession, T>::builder();
         endpoint_builder.default_client_config(client_cfg);
 
         let (endpoint, _) = endpoint_builder.with_socket(socket)?;
 
         // connect to remote
-        let quinn::NewConnection { connection, .. } =
+        let quinn::generic::NewConnection { connection, .. } =
             endpoint.connect(&remote, "localhost")?.await?;
 
         Ok(Self {
             quic: connection,
             tcp: TcpListener::bind(bind).await?,
-            socket_type: PhantomData,
         })
     }
 
@@ -85,7 +90,10 @@ impl<T: Socket> Client<T> {
 }
 
 // Handle a single TCP stream from the requestor
-async fn handle_stream(quic: Connection, mut stream: TcpStream) -> anyhow::Result<()> {
+async fn handle_stream<T: Socket>(
+    quic: Connection<TlsSession, T>,
+    mut stream: TcpStream,
+) -> anyhow::Result<()> {
     match InitReq::read(&mut stream).await? {
         InitReq { version, mtds }
             if (version == SOCKS_VERSION) && mtds.contains(&AuthMethods::NoAuth) =>
@@ -107,7 +115,9 @@ async fn handle_stream(quic: Connection, mut stream: TcpStream) -> anyhow::Resul
     let mut quic_stream = QuinnStream::new(recv, send);
     info!("stream created successfully");
 
-    tokio::io::copy_bidirectional(&mut stream, &mut quic_stream).await?;
+    tokio::io::copy_bidirectional(&mut stream, &mut quic_stream)
+        .await
+        .unwrap();
 
     info!("requestor closed");
 

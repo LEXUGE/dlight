@@ -585,6 +585,7 @@ dependencies = [
 [[package]]
 name = "quinn"
 version = "0.7.0"
+source = "git+https://github.com/LEXUGE/quinn?branch=main#a3d669135c4322a8d3502baf2cbdd3be64fc283a"
 dependencies = [
  "bytes",
  "futures",
@@ -605,6 +606,7 @@ dependencies = [
 [[package]]
 name = "quinn-proto"
 version = "0.7.0"
+source = "git+https://github.com/LEXUGE/quinn?branch=main#a3d669135c4322a8d3502baf2cbdd3be64fc283a"
 dependencies = [
  "bytes",
  "ct-logs",

@@ -11,10 +11,10 @@ rcgen = "^0.8"
 webpki = "^0.21"
 rustls = { version = "^0.19", features = ["dangerous_configuration"] }
 
-# quinn = { git = "https://github.com/LEXUGE/quinn", branch = "main" }
-# quinn-proto = { git = "https://github.com/LEXUGE/quinn", branch = "main" }
-quinn = { path = "../quinn/quinn" }
-quinn-proto = { path = "../quinn/quinn-proto" }
+quinn = { git = "https://github.com/LEXUGE/quinn", branch = "main" }
+quinn-proto = { git = "https://github.com/LEXUGE/quinn", branch = "main" }
+# quinn = { path = "../quinn/quinn" }
+# quinn-proto = { path = "../quinn/quinn-proto" }
 
 num_enum = "^0.5"
 thiserror = "^1.0"

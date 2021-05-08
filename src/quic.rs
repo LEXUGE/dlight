@@ -1,18 +1,22 @@
-use quinn::{RecvStream, SendStream};
+use quinn::{
+    crypto::rustls::TlsSession,
+    generic::{RecvStream, SendStream},
+    transport::Socket,
+};
 use tokio::io::{AsyncRead, AsyncWrite};
 
-pub struct QuinnStream {
-    recv: RecvStream,
-    send: SendStream,
+pub struct QuinnStream<T: Socket> {
+    recv: RecvStream<TlsSession, T>,
+    send: SendStream<TlsSession, T>,
 }
 
-impl QuinnStream {
-    pub fn new(recv: RecvStream, send: SendStream) -> Self {
+impl<T: Socket> QuinnStream<T> {
+    pub fn new(recv: RecvStream<TlsSession, T>, send: SendStream<TlsSession, T>) -> Self {
         Self { recv, send }
     }
 }
 
-impl AsyncRead for QuinnStream {
+impl<T: Socket> AsyncRead for QuinnStream<T> {
     fn poll_read(
         mut self: std::pin::Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
@@ -22,7 +26,7 @@ impl AsyncRead for QuinnStream {
     }
 }
 
-impl AsyncWrite for QuinnStream {
+impl<T: Socket> AsyncWrite for QuinnStream<T> {
     fn poll_write(
         mut self: std::pin::Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,

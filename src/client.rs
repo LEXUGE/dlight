@@ -66,7 +66,7 @@ impl<T: Socket> Client<T> {
     ) -> anyhow::Result<Self> {
         // We send keep-alive-package to keep the connection alive!
         let mut transport_cfg = TransportConfig::default();
-        transport_cfg.keep_alive_interval(Some(Duration::from_millis(7000)));
+        transport_cfg.keep_alive_interval(Some(Duration::from_secs(30)));
         transport_cfg.max_idle_timeout(Some(std::time::Duration::from_secs(180)))?;
 
         let mut client_cfg = configure_client();

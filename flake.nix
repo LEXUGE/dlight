@@ -5,10 +5,22 @@
     nixpkgs.url = "github:nixos/nixpkgs/nixos-unstable";
     rust-overlay.url = "github:oxalica/rust-overlay";
     utils.url = "github:numtide/flake-utils";
+    naersk.url = "github:nmattia/naersk";
   };
 
-  outputs = { nixpkgs, rust-overlay, utils, ... }:
+  outputs = { nixpkgs, rust-overlay, utils, naersk, ... }:
     utils.lib.eachSystem (utils.lib.defaultSystems) (system: rec {
+      # `nix build`
+      packages.dlight = (naersk.lib."${system}".buildPackage {
+        name = "dlight";
+        version = "git";
+        root = ./.;
+        passthru.exePath = "/bin/dlight";
+      });
+
+      defaultPackage = packages.dlight;
+
+      checks = packages;
 
       apps = {
         gencert = utils.lib.mkApp {
@@ -30,6 +42,13 @@
               rm rootca.srl
             '';
         };
+        commit = (import ./commit.nix {
+          lib = utils.lib;
+          pkgs = import nixpkgs {
+            system = "${system}";
+            overlays = [ rust-overlay.overlay ];
+          };
+        });
       };
 
       # `nix develop`

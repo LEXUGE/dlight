@@ -26,12 +26,12 @@ async fn main() -> Result<()> {
         let client = std::sync::Arc::new(
             Client::<DnsSocket>::init(remote, args.bind, udp.try_into()?, &args.hostname).await?,
         );
-        //let mut client = Client::<quinn::transport::UdpSocket>::init(remote, args.bind, udp.try_into()?).await?;
+        // let mut client = Client::<quinn::transport::UdpSocket>::init(remote, args.bind, udp.try_into()?).await?;
         client::run(client).await?;
     } else {
         let udp = std::net::UdpSocket::bind(args.bind)?;
         let mut server = Server::<DnsSocket>::new(udp.try_into()?)?;
-        //let mut server = Server::<quinn::transport::UdpSocket>::new(udp.try_into()?)?;
+        // let mut server = Server::<quinn::transport::UdpSocket>::new(udp.try_into()?)?;
         server.serve().await?;
     }
     Ok(())

@@ -20,7 +20,7 @@ impl<T: Socket> Server<T> {
     pub fn new(socket: T) -> anyhow::Result<Self> {
         // Generate a certificate that's valid for "localhost"
         // We are having trouble with IP signed root CA
-        let subject_alt_names = vec!["localhost".to_string(), "a.cn".to_string()];
+        let subject_alt_names = vec!["localhost".to_string()];
         let cert = generate_simple_self_signed(subject_alt_names).unwrap();
 
         let cert_chain = CertificateChain::from_pem(&cert.serialize_pem()?.into_bytes())?;

@@ -5,18 +5,18 @@ use quinn::{
 };
 use tokio::io::{AsyncRead, AsyncWrite};
 
-pub struct QuinnStream<T: Socket> {
+pub struct QuicStream<T: Socket> {
     recv: RecvStream<TlsSession, T>,
     send: SendStream<TlsSession, T>,
 }
 
-impl<T: Socket> QuinnStream<T> {
+impl<T: Socket> QuicStream<T> {
     pub fn new(recv: RecvStream<TlsSession, T>, send: SendStream<TlsSession, T>) -> Self {
         Self { recv, send }
     }
 }
 
-impl<T: Socket> AsyncRead for QuinnStream<T> {
+impl<T: Socket> AsyncRead for QuicStream<T> {
     fn poll_read(
         mut self: std::pin::Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
@@ -26,7 +26,7 @@ impl<T: Socket> AsyncRead for QuinnStream<T> {
     }
 }
 
-impl<T: Socket> AsyncWrite for QuinnStream<T> {
+impl<T: Socket> AsyncWrite for QuicStream<T> {
     fn poll_write(
         mut self: std::pin::Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,

@@ -23,10 +23,11 @@ async fn main() -> Result<()> {
         // The reason behind is that the ConnectionDriver exits when EndpointDriver exits when transport poll_send fails because
         // we are listening on loopback instead of 0.0.0.0!
         let udp = std::net::UdpSocket::bind("0.0.0.0:0")?;
-        let mut client =
-            Client::<DnsSocket>::init(remote, args.bind, udp.try_into()?, &args.hostname).await?;
+        let client = std::sync::Arc::new(
+            Client::<DnsSocket>::init(remote, args.bind, udp.try_into()?, &args.hostname).await?,
+        );
         //let mut client = Client::<quinn::transport::UdpSocket>::init(remote, args.bind, udp.try_into()?).await?;
-        client.run().await?;
+        client::run(client).await?;
     } else {
         let udp = std::net::UdpSocket::bind(args.bind)?;
         let mut server = Server::<DnsSocket>::new(udp.try_into()?)?;

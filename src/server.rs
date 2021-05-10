@@ -1,5 +1,5 @@
 use crate::{
-    quic::QuinnStream,
+    quic::QuicStream,
     socks::{CmdReply, CmdRequest, Command, RespCode, SOCKS_VERSION},
 };
 use bytes::BytesMut;
@@ -61,7 +61,7 @@ impl<T: Socket> Server<T> {
                         while let Some(x) = conn.bi_streams.next().await {
                             match x {
                                 Ok((send, recv)) => {
-                                    tokio::spawn(handle_bidi(QuinnStream::new(recv, send)));
+                                    tokio::spawn(handle_bidi(QuicStream::new(recv, send)));
                                 }
                                 Err(e) => {
                                     warn!("a connection error occured: {}", e);
@@ -80,7 +80,7 @@ impl<T: Socket> Server<T> {
     }
 }
 
-async fn handle_bidi<T: Socket>(mut stream: QuinnStream<T>) -> anyhow::Result<()> {
+async fn handle_bidi<T: Socket>(mut stream: QuicStream<T>) -> anyhow::Result<()> {
     // Authentication and methods selection have already been done on the "client" side of the QUIC connection, we only care about method.
     match CmdRequest::read(&mut stream).await? {
         CmdRequest {
